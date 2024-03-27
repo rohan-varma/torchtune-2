@@ -171,6 +171,7 @@ def lora_llama2_13b(
         TransformerDecoder: Instantiation of Llama2 13B model with LoRA applied
     """
 
+    print("--- RV: quantizing 13b ---", flush=True)
     return lora_llama2(
         lora_attn_modules=lora_attn_modules,
         apply_lora_to_mlp=apply_lora_to_mlp,
@@ -188,7 +189,7 @@ def lora_llama2_13b(
         lora_rank=lora_rank,
         lora_alpha=lora_alpha,
         lora_dropout=0.05,
-        quantize_base=quantize_base,
+        quantize_base=True,
     )
 
 qlora_llama2_13b = partial(lora_llama2_13b, quantize_base=True)

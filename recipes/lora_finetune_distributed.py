@@ -244,7 +244,7 @@ class LoRAFinetuneRecipeDistributed(FTRecipeInterface):
             log.info("FSDP is enabled. Instantiating Model on CPU for Rank 0 ...")
             init_start = time.perf_counter()
 
-            with utils.set_default_dtype(self._dtype):
+            with utils.set_default_dtype(self._dtype), torch.device("cuda"):
                 model = config.instantiate(cfg_model)
 
             log.info(
@@ -291,11 +291,20 @@ class LoRAFinetuneRecipeDistributed(FTRecipeInterface):
         self.adapter_params = get_adapter_params(model)
         set_trainable_params(model, self.adapter_params)
 
+        # Find nf4 tensors and reparametrize them as bf16
+        nf4_params = []
+        from torchao.dtypes import NF4Tensor, to_nf4
+
+        for n, p in model.named_parameters():
+            if isinstance(p, NF4Tensor):
+                nf4_params.append((n, p))
+            p.data = p.to(torch.bfloat16)
         model = FSDP(
             module=model,
             auto_wrap_policy=utils.lora_fsdp_wrap_policy(
                 modules_to_wrap={modules.TransformerDecoderLayer}
             ),
+            use_orig_params=True,
             sharding_strategy=torch.distributed.fsdp.ShardingStrategy.FULL_SHARD,
             device_id=self._device,
             # this recipe does not currently support mixed precision training
@@ -311,6 +320,13 @@ class LoRAFinetuneRecipeDistributed(FTRecipeInterface):
                 else None
             ),
         )
+        # Reparametrize tensors back to nf4
+        names = set([n for n, _ in nf4_params])
+        for n, p in model.named_parameters():
+            if n in names:
+                p.data = to_nf4(p.data)
+
+            assert isinstance(p, NF4Tensor)
 
         # Ensure no params and buffers are on meta device
         utils.validate_no_params_on_meta_device(model)
